@@ -1,161 +1,285 @@
 import streamlit as st
-from openai import OpenAI
+import requests
+from typing import Dict, List, Tuple
 
-# ===== 페이지 기본 설정 =====
-st.set_page_config(page_title="대학생 영어 회화 챗봇", page_icon="💬")
+# =========================
+# Config / Constants
+# =========================
+TMDB_DISCOVER_URL = "https://api.themoviedb.org/3/discover/movie"
+TMDB_POSTER_BASE = "https://image.tmdb.org/t/p/w500"
 
-# ===== 사이드바: API 키 + 대화 상황 =====
-with st.sidebar:
-    st.title("⚙️ 설정")
+GENRES: Dict[str, int] = {
+    "액션": 28,
+    "코미디": 35,
+    "드라마": 18,
+    "SF": 878,
+    "로맨스": 10749,
+    "판타지": 14,
+}
 
-    # 1) OpenAI API 키 입력 (암호 처리)
-    api_key_input = st.text_input(
-        "OpenAI API Key",
-        type="password",
-        placeholder="sk-로 시작하는 키를 입력하세요",
-        help="키는 브라우저 세션 안에서만 사용되며, 서버에 별도로 저장되지 않습니다."
-    )
+# =========================
+# Helpers
+# =========================
+def safe_get_json(url: str, params: dict, timeout: int = 10) -> Tuple[bool, dict, str]:
+    """Return (ok, data, error_message)."""
+    try:
+        r = requests.get(url, params=params, timeout=timeout)
+        if r.status_code != 200:
+            try:
+                msg = r.json().get("status_message", "")
+            except Exception:
+                msg = ""
+            return False, {}, f"TMDB 요청 실패 (status={r.status_code}) {msg}".strip()
+        return True, r.json(), ""
+    except requests.RequestException as e:
+        return False, {}, f"네트워크 오류: {e}"
 
-    # 세션에 저장해서 한 번 입력하면 계속 사용
-    if api_key_input:
-        st.session_state["OPENAI_API_KEY"] = api_key_input
+def choose_genre(scores: Dict[str, int]) -> str:
+    order = ["액션", "코미디", "드라마", "SF", "로맨스", "판타지"]
+    max_score = max(scores.values())
+    candidates = [g for g, s in scores.items() if s == max_score]
+    for g in order:
+        if g in candidates:
+            return g
+    return candidates[0]
 
-    # 현재 세션에서 사용될 키 (이미 저장돼 있으면 그거 사용)
-    openai_api_key = st.session_state.get("OPENAI_API_KEY", "")
+def build_reason(genre: str, picks: Dict[str, str]) -> str:
+    tone = picks.get("tone", "")
+    pace = picks.get("pace", "")
+    vibe = picks.get("vibe", "")
+    ending = picks.get("ending", "")
 
-    # 2) 대화 상황 선택
-    st.markdown("---")
-    st.subheader("대화 상황 선택")
+    base = {
+        "액션": "긴장감과 몰입감이 높은 전개를 좋아하는 성향이 강해요.",
+        "코미디": "가볍게 웃으면서 스트레스를 푸는 콘텐츠가 잘 맞아요.",
+        "드라마": "감정선과 관계의 깊이를 천천히 음미하는 타입이에요.",
+        "SF": "새로운 세계관/아이디어를 탐험하는 상상력이 강해요.",
+        "로맨스": "사람 사이의 설렘과 온도를 중요하게 느끼는 편이에요.",
+        "판타지": "현실을 벗어난 마법 같은 분위기와 모험을 선호해요.",
+    }.get(genre, "")
 
-    SCENARIOS = {
-        "카페에서 주문하기": "You are talking to a barista at a cafe. The user is a Korean college student practicing natural spoken English to order drinks and snacks.",
-        "교수님과 면담하기": "You are meeting a professor during office hours. The user wants to talk about grades, assignments, and future plans in natural spoken English.",
-        "친구와 일상 대화": "You are chatting with a close college friend. Use casual, natural spoken English about daily life and campus life.",
-        "여행지에서 길 묻기": "You are asking for directions while traveling abroad. Use polite but natural spoken English appropriate for talking to a stranger.",
-        "취업/인턴 면접": "You are in a job or internship interview. Use formal, professional spoken English suitable for interviews."
+    extras: List[str] = []
+    if tone:
+        extras.append(f"선호 톤: **{tone}**")
+    if pace:
+        extras.append(f"전개 속도: **{pace}**")
+    if vibe:
+        extras.append(f"원하는 감정: **{vibe}**")
+    if ending:
+        extras.append(f"엔딩 취향: **{ending}**")
+
+    return base + ("  \n- " + "  \n- ".join(extras) if extras else "")
+
+def analyze_answers_to_genre(picks: Dict[str, str]) -> Tuple[str, Dict[str, int], str]:
+    scores = {g: 0 for g in GENRES.keys()}
+
+    tone = picks.get("tone")
+    pace = picks.get("pace")
+    vibe = picks.get("vibe")
+    ending = picks.get("ending")
+
+    # Q1
+    if tone == "짜릿하고 강렬한":
+        scores["액션"] += 3
+        scores["SF"] += 1
+    elif tone == "가볍고 유쾌한":
+        scores["코미디"] += 3
+        scores["로맨스"] += 1
+    elif tone == "진지하고 감성적인":
+        scores["드라마"] += 3
+        scores["로맨스"] += 1
+    elif tone == "신비롭고 낯선":
+        scores["SF"] += 2
+        scores["판타지"] += 2
+
+    # Q2
+    if pace == "빠르게 몰아치는":
+        scores["액션"] += 2
+        scores["코미디"] += 1
+    elif pace == "적당히 리듬 있는":
+        scores["코미디"] += 1
+        scores["로맨스"] += 1
+        scores["SF"] += 1
+    elif pace == "천천히 쌓아가는":
+        scores["드라마"] += 2
+        scores["판타지"] += 1
+        scores["로맨스"] += 1
+
+    # Q3
+    if vibe == "아드레날린":
+        scores["액션"] += 2
+        scores["SF"] += 1
+    elif vibe == "힐링/웃음":
+        scores["코미디"] += 2
+        scores["로맨스"] += 1
+    elif vibe == "먹먹함/여운":
+        scores["드라마"] += 2
+    elif vibe == "설렘":
+        scores["로맨스"] += 3
+        scores["코미디"] += 1
+
+    # Q4
+    if ending == "통쾌한":
+        scores["액션"] += 2
+        scores["코미디"] += 1
+    elif ending == "따뜻한":
+        scores["코미디"] += 1
+        scores["로맨스"] += 2
+        scores["드라마"] += 1
+    elif ending == "현실적인":
+        scores["드라마"] += 2
+    elif ending == "상상력을 자극하는":
+        scores["SF"] += 2
+        scores["판타지"] += 2
+
+    chosen = choose_genre(scores)
+    reason = build_reason(chosen, picks)
+    return chosen, scores, reason
+
+def get_movies_by_genre(api_key: str, genre_id: int, limit: int = 5) -> Tuple[bool, List[dict], str]:
+    params = {
+        "api_key": api_key,
+        "with_genres": genre_id,
+        "language": "ko-KR",
+        "sort_by": "popularity.desc",
+        "include_adult": "false",
+        "page": 1,
     }
+    ok, data, err = safe_get_json(TMDB_DISCOVER_URL, params=params)
+    if not ok:
+        return False, [], err
 
-    selected_scenario = st.selectbox(
-        "연습할 상황",
-        options=list(SCENARIOS.keys()),
+    results = data.get("results", []) or []
+    return True, results[:limit], ""
+
+def per_movie_reason(genre: str, test_reason: str, movie: dict) -> str:
+    vote = movie.get("vote_average", 0)
+    overview = (movie.get("overview") or "").strip()
+    short = overview[:120] + ("..." if len(overview) > 120 else "")
+    return f"- 당신의 **{genre}** 취향과 결이 맞는 인기작이에요.\n- 평점 **{vote}/10**으로 반응도 좋아요.\n- 한 줄 포인트: {short if short else '줄거리 정보가 부족하지만, 장르 적합도가 높아요.'}"
+
+# =========================
+# App UI
+# =========================
+st.set_page_config(page_title="심리테스트 + TMDB 추천", page_icon="🎬", layout="wide")
+st.title("🧠🎬 심리테스트 결과로 영화 추천 (TMDB 연동)")
+
+with st.sidebar:
+    st.header("TMDB 설정")
+    TMDB_API_KEY = st.text_input("TMDB API Key", type="password")
+    st.caption("키를 입력하면 결과 화면에서 장르별 인기 영화 5개를 가져옵니다.")
+
+st.divider()
+st.subheader("심리테스트")
+st.write("아래 질문에 답하고 **결과 보기**를 누르면, 답변을 분석해 장르를 선택하고 TMDB에서 영화 5편을 추천합니다.")
+
+if "submitted" not in st.session_state:
+    st.session_state.submitted = False
+
+# 질문(예시) — 기존 심리테스트 질문이 있다면 그대로 교체
+col1, col2 = st.columns(2)
+with col1:
+    st.radio(
+        "Q1. 지금 끌리는 분위기는?",
+        ["짜릿하고 강렬한", "가볍고 유쾌한", "진지하고 감성적인", "신비롭고 낯선"],
         index=0,
-        key="scenario_select"
+        key="tone",
+    )
+    st.radio(
+        "Q2. 선호하는 전개 속도는?",
+        ["빠르게 몰아치는", "적당히 리듬 있는", "천천히 쌓아가는"],
+        index=0,
+        key="pace",
+    )
+with col2:
+    st.radio(
+        "Q3. 오늘 보고 싶은 감정은?",
+        ["아드레날린", "힐링/웃음", "먹먹함/여운", "설렘"],
+        index=0,
+        key="vibe",
+    )
+    st.radio(
+        "Q4. 좋아하는 결말 스타일은?",
+        ["통쾌한", "따뜻한", "현실적인", "상상력을 자극하는"],
+        index=0,
+        key="ending",
     )
 
-    st.markdown("---")
-    st.caption("모델: gpt-4o-mini (OpenAI API)")
+st.divider()
 
-# ===== API 키가 없으면 안내 후 종료 =====
-if not openai_api_key:
-    st.title("대학생 영어 회화 냉철 튜터 💬")
-    st.write("먼저 왼쪽 **사이드바에서 OpenAI API Key**를 입력해 주세요. (키는 `sk-`로 시작합니다.)")
-    st.stop()
+picks = {
+    "tone": st.session_state.get("tone", ""),
+    "pace": st.session_state.get("pace", ""),
+    "vibe": st.session_state.get("vibe", ""),
+    "ending": st.session_state.get("ending", ""),
+}
 
-# ===== OpenAI 클라이언트 생성 (사이드바 키 사용) =====
-client = OpenAI(api_key=openai_api_key)
+if st.button("✅ 결과 보기", type="primary"):
+    st.session_state.submitted = True
 
-# ===== 세션 상태 초기화 =====
-if "messages" not in st.session_state:
-    st.session_state.messages = []
+# =========================
+# Result View (Pretty)
+# =========================
+if st.session_state.submitted:
+    genre_name, scores, test_reason = analyze_answers_to_genre(picks)
+    genre_id = GENRES[genre_name]
 
-if "scenario" not in st.session_state:
-    st.session_state.scenario = selected_scenario
+    # 요구사항 1: 타이틀
+    st.markdown(f"## ✨ 당신에게 딱인 장르는: **{genre_name}**!")
+    st.caption("답변 기반 분석 요약")
+    st.markdown(test_reason)
 
-# 상황이 바뀌면 대화 초기화
-if selected_scenario != st.session_state.scenario:
-    st.session_state.scenario = selected_scenario
-    st.session_state.messages = []
-    st.experimental_rerun()
+    with st.expander("점수 상세(디버그)"):
+        st.json(scores)
 
-# ===== 시스템 프롬프트 =====
-SYSTEM_PROMPT = f"""
-당신은 한국인 대학생의 영어 회화 학습 도우미입니다.
-사용자가 선택한 상황에 맞게, 실제 원어민이 쓰는 자연스러운 구어체 영어를 사용하여 답변하세요.
-현재 상황: {selected_scenario}.
+    st.divider()
 
-성격:
-- 매우 냉철하고 솔직한 성격입니다.
-- 사용자의 영어 표현에서 문법, 어휘, 뉘앙스, 자연스러움에 문제가 있으면 반드시 바로잡습니다.
-- 틀린 점이나 어색한 표현이 있다면,
-  1) 먼저 자연스러운 영어로 대답을 해 주고 (대화 유지),
-  2) 그 아래에 "Correction:" 섹션을 만들어 올바른 표현을 제시하고,
-  3) 최소 2개 이상의 짧은 예문을 영어로 제시하며,
-  4) 필요하면 한국어로 간단히 이유를 설명합니다.
+    st.subheader("🎥 추천 영화")
 
-스타일:
-- 가능한 한 짧고 자연스러운 회화체 문장을 사용합니다.
-- 대학생이 실제로 쓸 법한 표현을 우선적으로 사용합니다.
-- 단, 설명(Correction 부분)은 명확하고 논리적으로 작성합니다.
-- 사용자가 한국어로 질문하면, 먼저 짧은 영어 답변을 주고,
-  그 뒤에 한국어로도 간단히 설명해 줍니다.
+    if not TMDB_API_KEY:
+        st.warning("사이드바에 TMDB API Key를 입력하면 추천 영화를 불러올 수 있어요.")
+    else:
+        # 요구사항 5: 로딩 스피너
+        with st.spinner("TMDB에서 영화를 불러오는 중..."):
+            ok, movies, err = get_movies_by_genre(TMDB_API_KEY, genre_id, limit=5)
 
-목표:
-- 사용자가 수능식 영어가 아니라 실제 회화에 익숙해지도록 돕습니다.
-- 문법적으로만 맞는 문장이 아니라, 진짜 원어민스럽게 들리는 표현을 우선합니다.
-"""
+        if not ok:
+            st.error(err)
+        elif not movies:
+            st.info("영화 데이터를 찾지 못했습니다. (결과가 비어 있음)")
+        else:
+            # 요구사항 2: 3열 카드 배치
+            cols = st.columns(3, gap="large")
 
-# ===== 메인 영역 UI =====
-st.title("대학생 영어 회화 냉철 튜터 💬")
-st.write(
-    "수능 영어는 자신 있는데, 실제 **영어 회화**가 어색한 대학생을 위한 챗봇입니다. "
-    "냉철하게 틀린 표현을 바로잡아 주고, 자연스러운 예문까지 보여 줍니다."
-)
+            for i, m in enumerate(movies):
+                title = m.get("title") or m.get("name") or "제목 없음"
+                vote = m.get("vote_average", 0)
+                overview = (m.get("overview") or "").strip()
+                release_date = m.get("release_date", "")
+                poster_path = m.get("poster_path")
+                poster_url = f"{TMDB_POSTER_BASE}{poster_path}" if poster_path else None
 
-st.markdown(f"**현재 상황:** {selected_scenario}")
-st.markdown("---")
+                col = cols[i % 3]
+                with col:
+                    # 카드 느낌(간단)
+                    with st.container(border=True):
+                        # 요구사항 3: 포스터/제목/평점
+                        if poster_url:
+                            st.image(poster_url, use_container_width=True)
+                        else:
+                            st.info("포스터 없음")
 
-# 기존 대화 출력
-for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
+                        st.markdown(f"### {title}")
+                        st.write(f"⭐ **평점:** {vote}/10")
 
-# ===== 모델 호출 함수 (스트리밍) =====
-def generate_response(messages):
-    """
-    gpt-4o-mini 스트리밍 응답.
-    """
-    stream = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=messages,
-        temperature=0.7,
-        stream=True,
-    )
+                        # 요구사항 4: expander로 상세
+                        with st.expander("상세 보기"):
+                            if release_date:
+                                st.write(f"📅 **개봉일:** {release_date}")
+                            st.write(overview if overview else "줄거리 정보가 없습니다.")
 
-    full_response = ""
-    for chunk in stream:
-        delta = chunk.choices[0].delta
-        if delta and delta.content:
-            full_response += delta.content
-            yield delta.content
+                            st.markdown("**이 영화를 추천하는 이유**")
+                            st.markdown(per_movie_reason(genre_name, test_reason, m))
 
-# ===== 사용자 입력 =====
-user_input = st.chat_input("영어 또는 한국어로 자유롭게 말해 보세요.")
-
-if user_input:
-    # 사용자 메시지 저장 및 표시
-    user_msg = {"role": "user", "content": user_input}
-    st.session_state.messages.append(user_msg)
-
-    with st.chat_message("user"):
-        st.markdown(user_input)
-
-    # 모델에 보낼 전체 메시지 (시스템 + 히스토리)
-    model_messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-    model_messages.extend(st.session_state.messages)
-
-    # 어시스턴트 메시지 (스트리밍)
-    with st.chat_message("assistant"):
-        response_container = st.empty()
-        streamed_text = ""
-
-        for token in generate_response(model_messages):
-            streamed_text += token
-            response_container.markdown(streamed_text)
-
-    # 전체 응답을 대화 기록에 저장
-    st.session_state.messages.append(
-        {"role": "assistant", "content": streamed_text}
-    )
-
-
-            
+else:
+    st.info("모든 질문에 답한 뒤 **결과 보기**를 눌러주세요.")
