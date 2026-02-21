@@ -1,16 +1,12 @@
-import os
+import importlib
 import json
 import math
+import os
 import sqlite3
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 import streamlit as st
-
-try:
-    from openai import OpenAI
-except Exception:
-    OpenAI = None
 
 
 # =========================
@@ -152,7 +148,26 @@ CURRICULUM = [
 # Utils
 # =========================
 def now_iso() -> str:
-    return datetime.utcnow().isoformat()
+    return datetime.now(UTC).isoformat()
+
+
+BLOCKED_UI_PHRASES = ["프로젝트 평가 기준", "상상력 (10점)", "실행력 (10점)", "영향력 (10점)"]
+
+
+def sanitize_ui_text(text: str) -> str:
+    if not text:
+        return ""
+    out = str(text)
+    for phrase in BLOCKED_UI_PHRASES:
+        out = out.replace(phrase, "")
+    return out.strip()
+
+
+def load_openai_client_class():
+    if importlib.util.find_spec("openai") is None:
+        return None
+    module = importlib.import_module("openai")
+    return getattr(module, "OpenAI", None)
 
 
 def clamp_int(n: int, lo: int, hi: int) -> int:
@@ -188,7 +203,6 @@ def flatten_cards() -> List[Dict[str, Any]]:
 
 
 ALL_CARDS = flatten_cards()
-
 
 # =========================
 # DB + Migration
@@ -456,9 +470,10 @@ def get_card_embedding(card_id: str) -> Optional[List[float]]:
 def get_client_and_model():
     api_key = st.session_state.get("openai_api_key") or ""
     model = st.session_state.get("openai_model") or DEFAULT_MODEL
-    if not api_key or OpenAI is None:
+    openai_cls = load_openai_client_class()
+    if not api_key or openai_cls is None:
         return None, model
-    return OpenAI(api_key=api_key), model
+    return openai_cls(api_key=api_key), model
 
 
 def call_oai_text(client, model: str, system: str, user: str) -> str:
@@ -522,7 +537,6 @@ def character_card(level: int) -> str:
       </div>
     </div>
     """
-
 
 # =========================
 # Card enrich + Quiz
@@ -834,13 +848,17 @@ if page == "학습":
 
     enrich = get_card_enrichment(card["card_id"])
     if enrich["summary"] or enrich["easy"] or enrich["examples"]:
-        st.markdown("#### 🤖 자동 생성 콘텐츠(Responses API)")
-        if enrich["summary"]:
-            st.info(enrich["summary"])
-        if enrich["easy"]:
-            st.write(enrich["easy"])
-        if enrich["examples"]:
-            st.code(enrich["examples"], language="python")
+        clean_summary = sanitize_ui_text(enrich["summary"])
+        clean_easy = sanitize_ui_text(enrich["easy"])
+        clean_examples = sanitize_ui_text(enrich["examples"])
+        if clean_summary or clean_easy or clean_examples:
+            st.markdown("#### 🤖 자동 생성 콘텐츠(Responses API)")
+        if clean_summary:
+            st.info(clean_summary)
+        if clean_easy:
+            st.write(clean_easy)
+        if clean_examples:
+            st.code(clean_examples, language="python")
 
     if st.session_state.show_card_again:
         st.info("같은 개념 카드를 다시 확인했습니다. 이제 다시 문제를 풀어도 됩니다.")
@@ -883,7 +901,7 @@ if page == "학습":
 
     q = st.session_state.quiz
     st.markdown("#### 문제")
-    st.markdown(q["question"])
+    st.markdown(sanitize_ui_text(q["question"]))
     if q.get("code"):
         st.markdown("#### 코드")
         st.code(q["code"], language="python")
@@ -1080,4 +1098,4 @@ else:
                 st.write(f"- {c}{suffix}")
 
             st.markdown("**해설**")
-            st.write(r["explanation"])
+            st.write(sanitize_ui_text(r["explanation"]))
