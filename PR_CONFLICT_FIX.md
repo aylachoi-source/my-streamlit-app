@@ -20,13 +20,23 @@ git commit -m "Resolve merge conflict with main"
 git push origin <PR브랜치명>
 ```
 
-## 2) 로컬 자동화 스크립트
+## 2) app.py를 PR 버전(ours)으로 빠르게 고정하는 방법
+
+`app.py`만 충돌이고, **PR 브랜치의 app.py를 그대로 유지**하고 싶으면:
+
+```bash
+bash scripts/resolve_pr_conflict.sh <PR브랜치명> --auto-ours-app
+```
+
+이 모드는 내부적으로 `git checkout --ours app.py`를 수행하고 커밋까지 만듭니다.
+
+## 3) 로컬 자동화 스크립트
 
 ```bash
 bash scripts/resolve_pr_conflict.sh <PR브랜치명>
 ```
 
-## 3) GitHub 웹에서 직접 해결
+## 4) GitHub 웹에서 직접 해결
 
 1. PR 페이지의 **Resolve conflicts** 클릭
 2. `app.py` 충돌 블록 정리
