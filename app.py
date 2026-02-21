@@ -495,7 +495,7 @@ def embed_text(client, text: str) -> Optional[List[float]]:
 
 
 # =========================
-# Character (easy SVG)
+# Character
 # =========================
 def level_bucket(level: int) -> int:
     return clamp_int((level - 1) // 10 + 1, 1, 10)
@@ -503,7 +503,6 @@ def level_bucket(level: int) -> int:
 
 def character_card(level: int) -> str:
     bucket = level_bucket(level)
-    # 난이도/레벨에 따른 “진화” 느낌만 주자
     if bucket <= 3:
         face, title = "🐣", "새싹 코더"
     elif bucket <= 7:
@@ -513,16 +512,16 @@ def character_card(level: int) -> str:
 
     bar = int((level / 100) * 100)
     return f"""
-    <div style="border:1px solid #e5e7eb;border-radius:16px;padding:12px;background:#fff;">
-      <div style="display:flex;gap:10px;align-items:center;">
-        <div style="font-size:44px;line-height:1;">{face}</div>
+    <div class="character-card">
+      <div class="character-row">
+        <div class="character-face">{face}</div>
         <div>
-          <div style="font-weight:700;">{title}</div>
-          <div style="color:#64748b;font-size:12px;">LV {level}/100 · 단계 {bucket}/10</div>
+          <div class="character-title">{title}</div>
+          <div class="character-sub">LV {level}/100 · 단계 {bucket}/10</div>
         </div>
       </div>
-      <div style="margin-top:10px;background:#eef2ff;border-radius:999px;height:10px;overflow:hidden;">
-        <div style="height:10px;width:{bar}%;background:#6366f1;"></div>
+      <div class="character-bar">
+        <div class="character-bar-fill" style="width:{bar}%;"></div>
       </div>
     </div>
     """
@@ -746,9 +745,47 @@ def recommend_similar_attempts(client, query_text: str, top_k: int = 3) -> List[
 # App
 # =========================
 db_init()
-st.set_page_config(page_title="CodeMap", layout="wide")
+st.set_page_config(page_title="CodeMap", page_icon="🗺️", layout="wide")
 
-st.title("CodeMap – Active Recall + 저장소 + 복습 추천 (캐릭터 간단 버전)")
+st.markdown(
+    """
+<style>
+/* 기본 블록 */
+.block { border-radius: 16px; padding: 16px 18px; border: 1px solid #E5E7EB; margin-bottom: 14px; background: #FFFFFF; }
+.block-green { background: #F6FFF7; border-color:#D8EFD9; }
+.block-blue  { background: #F7FBFF; border-color:#D6E8FF; }
+.small-muted { color:#64748B; font-size:13px; }
+
+/* 상단 헤더 */
+.hero { padding: 14px 16px; border: 1px solid #E5E7EB; border-radius: 18px; background: #FFFFFF; margin-bottom: 14px; }
+.hero-title { font-size: 28px; font-weight: 800; margin: 0; }
+.hero-sub { color:#475569; margin-top: 6px; font-size: 14px; }
+
+/* 캐릭터 카드 */
+.character-card { border:1px solid #E5E7EB; border-radius:16px; padding:12px; background:#FFFFFF; }
+.character-row { display:flex; gap:10px; align-items:center; }
+.character-face { font-size:44px; line-height:1; }
+.character-title { font-weight:800; }
+.character-sub { color:#64748B; font-size:12px; margin-top:2px; }
+.character-bar { margin-top:10px; background:#EEF2FF; border-radius:999px; height:10px; overflow:hidden; }
+.character-bar-fill { height:10px; background:#6366F1; }
+
+/* 버튼 간격 살짝 */
+div.stButton > button { border-radius: 12px; }
+</style>
+""",
+    unsafe_allow_html=True,
+)
+
+st.markdown(
+    """
+<div class="hero">
+  <div class="hero-title">CodeMap</div>
+  <div class="hero-sub">개념 카드 → 퀴즈(회상) → 오답 기반 복습 추천까지 한 흐름으로 학습을 이어갑니다.</div>
+</div>
+""",
+    unsafe_allow_html=True,
+)
 
 st.session_state.setdefault("quiz", None)
 st.session_state.setdefault("pending_buttons", False)
@@ -756,23 +793,14 @@ st.session_state.setdefault("last_correct", None)
 st.session_state.setdefault("stop_mode", False)
 st.session_state.setdefault("show_card_again", False)
 
-st.markdown("""
-<style>
-.block { border-radius: 16px; padding: 16px 18px; border: 1px solid #E0E0E0; margin-bottom: 14px; }
-.block-green { background: #F6FFF7; border-color:#D8EFD9; }
-.block-blue  { background: #F7FBFF; border-color:#D6E8FF; }
-.small-muted { color:#607D8B; font-size:13px; }
-</style>
-""", unsafe_allow_html=True)
-
 with st.sidebar:
     st.header("설정")
     st.text_input("OpenAI API Key", type="password", key="openai_api_key")
     st.text_input("모델", key="openai_model", value=DEFAULT_MODEL)
 
     client, model = get_client_and_model()
-    st.write(f"- 모델: `{model}`")
-    st.write(f"- OpenAI 연결: {'✅' if client else '❌'}")
+    st.caption(f"모델: `{model}`")
+    st.caption(f"OpenAI 연결: {'✅' if client else '❌'}")
 
     st.divider()
     page = st.radio("메뉴", ["학습", "복습 추천(오답 기반)", "저장소"], index=0)
@@ -808,7 +836,7 @@ if page == "학습":
     st.markdown(
         f"""
 <div class="block block-green">
-  <b>📘 개념 카드</b> <span class="small-muted">(카드 레벨 {card['base_level']}/100)</span><br><br>
+  <b>개념 카드</b> <span class="small-muted">(카드 레벨 {card['base_level']}/100)</span><br><br>
   <pre style="white-space:pre-wrap; margin:0; font-family: inherit;">{card['text']}</pre>
 </div>
         """,
@@ -838,7 +866,7 @@ if page == "학습":
 
     enrich = get_card_enrichment(card["card_id"])
     if enrich["summary"] or enrich["easy"] or enrich["examples"]:
-        st.markdown("#### 🤖 자동 생성 콘텐츠(Responses API)")
+        st.markdown("#### 자동 생성 콘텐츠(Responses API)")
         if enrich["summary"]:
             st.info(enrich["summary"])
         if enrich["easy"]:
@@ -854,7 +882,7 @@ if page == "학습":
     st.markdown(
         f"""
 <div class="block block-blue">
-  <b>🧠 퀴즈</b> <span class="small-muted">(퀴즈 레벨 {qlv}/100)</span>
+  <b>퀴즈</b> <span class="small-muted">(퀴즈 레벨 {qlv}/100)</span>
 </div>
         """,
         unsafe_allow_html=True,
@@ -980,7 +1008,7 @@ if page == "학습":
                 st.rerun()
 
 elif page == "복습 추천(오답 기반)":
-    st.subheader("오답 기반 복습 추천 (Embeddings)")
+    st.subheader("오답 기반 복습 추천")
 
     client, model = get_client_and_model()
     if not client:
@@ -1024,7 +1052,9 @@ elif page == "복습 추천(오답 기반)":
         st.info("유사 문제 추천 실패(임베딩 저장이 아직 없을 수 있음).")
     else:
         for score, a in sims_attempts:
-            st.markdown(f"- 기록ID {a['id']} · {a['card_id']} · {'✅' if a['is_correct'] else '❌'} (유사도 {score:.3f})")
+            st.markdown(
+                f"- 기록ID {a['id']} · {a['card_id']} · {'정답' if a['is_correct'] else '오답'} (유사도 {score:.3f})"
+            )
             st.write(a["question"])
             if a.get("code"):
                 st.code(a["code"], language="python")
@@ -1052,7 +1082,7 @@ else:
     st.write(f"표시: {len(filtered)}개")
 
     for r in filtered:
-        header = f"{r['step_id']} · {r['card_id']} · {'✅' if r['is_correct'] else '❌'} · LV{r['quiz_level']} · {r['created_at']}"
+        header = f"{r['step_id']} · {r['card_id']} · {'정답' if r['is_correct'] else '오답'} · LV{r['quiz_level']} · {r['created_at']}"
         with st.expander(header, expanded=False):
             st.markdown(f"**카드:** {r['card_title']} (카드 레벨 {r['card_base_level']}/100)")
 
