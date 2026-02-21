@@ -189,6 +189,27 @@ def flatten_cards() -> List[Dict[str, Any]]:
 
 ALL_CARDS = flatten_cards()
 
+EVALUATION_RUBRIC = [
+    {
+        "icon": "💡",
+        "title": "상상력",
+        "score": 10,
+        "criteria": ["기획의 참신함", "문제 정의의 독창성"],
+    },
+    {
+        "icon": "⚙️",
+        "title": "실행력",
+        "score": 10,
+        "criteria": ["완성도 / UX / 논리성", "안정적 구동 여부"],
+    },
+    {
+        "icon": "🎯",
+        "title": "영향력",
+        "score": 10,
+        "criteria": ["실제 사용 가능성", "인사이트의 가치"],
+    },
+]
+
 
 # =========================
 # DB + Migration
@@ -524,6 +545,23 @@ def character_card(level: int) -> str:
     """
 
 
+def render_evaluation_rubric() -> None:
+    st.markdown("### ✅ 프로젝트 평가 기준")
+    cols = st.columns(len(EVALUATION_RUBRIC))
+    for col, item in zip(cols, EVALUATION_RUBRIC):
+        criteria_html = "<br>".join(item["criteria"])
+        col.markdown(
+            f"""
+<div class="rubric-card">
+  <div class="rubric-icon">{item['icon']}</div>
+  <div class="rubric-title">{item['title']} ({item['score']}점)</div>
+  <div class="rubric-criteria">{criteria_html}</div>
+</div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+
 # =========================
 # Card enrich + Quiz
 # =========================
@@ -758,6 +796,14 @@ st.markdown("""
 .block-green { background: #F6FFF7; border-color:#D8EFD9; }
 .block-blue  { background: #F7FBFF; border-color:#D6E8FF; }
 .small-muted { color:#607D8B; font-size:13px; }
+.rubric-card { text-align:center; background:#F8FAFC; border:1px solid #E2E8F0; border-radius:16px; padding:18px 12px; min-height:220px; }
+.rubric-icon { width:90px; height:90px; margin:0 auto 12px; border-radius:50%; background:#1E3A8A; color:#FFFFFF; display:flex; align-items:center; justify-content:center; font-size:40px; }
+.rubric-title { font-size:32px; font-weight:700; color:#1E3A8A; margin-bottom:12px; }
+.rubric-criteria { color:#0F172A; font-size:24px; line-height:1.5; }
+@media (max-width: 900px) {
+  .rubric-title { font-size:24px; }
+  .rubric-criteria { font-size:18px; }
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -781,6 +827,7 @@ with st.sidebar:
 # Pages
 # =========================
 if page == "학습":
+    render_evaluation_rubric()
     char_level, card_index = get_user_state()
     card_index = clamp_int(card_index, 0, len(ALL_CARDS) - 1)
     card = ALL_CARDS[card_index]
