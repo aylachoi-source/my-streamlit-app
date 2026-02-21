@@ -189,7 +189,6 @@ def flatten_cards() -> List[Dict[str, Any]]:
 
 ALL_CARDS = flatten_cards()
 
-
 # =========================
 # DB + Migration
 # =========================
@@ -522,7 +521,6 @@ def character_card(level: int) -> str:
       </div>
     </div>
     """
-
 
 # =========================
 # Card enrich + Quiz
