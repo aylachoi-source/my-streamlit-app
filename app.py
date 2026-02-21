@@ -1,16 +1,12 @@
-import os
+import importlib
 import json
 import math
+import os
 import sqlite3
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 import streamlit as st
-
-try:
-    from openai import OpenAI
-except Exception:
-    OpenAI = None
 
 
 # =========================
@@ -152,7 +148,14 @@ CURRICULUM = [
 # Utils
 # =========================
 def now_iso() -> str:
-    return datetime.utcnow().isoformat()
+    return datetime.now(UTC).isoformat()
+
+
+def load_openai_client_class():
+    if importlib.util.find_spec("openai") is None:
+        return None
+    module = importlib.import_module("openai")
+    return getattr(module, "OpenAI", None)
 
 
 def clamp_int(n: int, lo: int, hi: int) -> int:
@@ -455,9 +458,10 @@ def get_card_embedding(card_id: str) -> Optional[List[float]]:
 def get_client_and_model():
     api_key = st.session_state.get("openai_api_key") or ""
     model = st.session_state.get("openai_model") or DEFAULT_MODEL
-    if not api_key or OpenAI is None:
+    openai_cls = load_openai_client_class()
+    if not api_key or openai_cls is None:
         return None, model
-    return OpenAI(api_key=api_key), model
+    return openai_cls(api_key=api_key), model
 
 
 def call_oai_text(client, model: str, system: str, user: str) -> str:
